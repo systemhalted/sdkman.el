@@ -1,6 +1,6 @@
 # sdkman.el
 
-Apply `.sdkmanrc` in Emacs — same SDK selection as `sdk env` in a shell.
+Apply `.sdkmanrc` in Emacs
 
 > **Unofficial integration.** `sdkman.el` is an unofficial Emacs package, not part of
 > the SDKMAN! project. SDKMAN! lives at <https://sdkman.io>.
@@ -127,8 +127,9 @@ predicate.
 
 ## Roadmap
 
-Planned for upcoming releases (tracked in
-[`docs/requirements.md`](docs/requirements.md)):
+Planned for upcoming releases. See
+[`docs/v1-plan.md`](docs/v1-plan.md) for the phased implementation plan,
+and [`docs/requirements.md`](docs/requirements.md) for the V1 spec.
 
 - **Expanded `sdkman-known-env-vars` defaults.** Out-of-the-box
   `<NAME>_HOME` for the common JVM-ecosystem SDKs: `ant`, `groovy`,
