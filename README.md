@@ -1,6 +1,4 @@
-# sdkman.el
-
-Apply `.sdkmanrc` in Emacs
+# sdkman.el - Manage your SDKs without leaving Emacs
 
 > **Unofficial integration.** `sdkman.el` is an unofficial Emacs package, not part of
 > the SDKMAN! project. SDKMAN! lives at <https://sdkman.io>.
