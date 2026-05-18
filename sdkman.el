@@ -72,10 +72,15 @@ or falls back to ~/.sdkman."
   :group 'sdkman)
 
 (defcustom sdkman-known-env-vars
-  '(("java" . "JAVA_HOME")
-    ("maven" . "MAVEN_HOME")
+  '(("java"   . "JAVA_HOME")
+    ("maven"  . "MAVEN_HOME")
     ("gradle" . "GRADLE_HOME"))
-  "Alist mapping SDKMAN SDK names to environment variable names."
+  "Alist mapping SDKMAN SDK names to environment variable names.
+Each entry causes `sdkman-apply-buffer-env' to set the named variable
+to the candidate home directory.  Add further entries for any SDK whose
+tools expect a home variable, for example:
+
+  (add-to-list \\='sdkman-known-env-vars \\='(\"ant\" . \"ANT_HOME\"))"
   :type '(alist :key-type string :value-type string)
   :group 'sdkman)
 
@@ -127,6 +132,47 @@ under the SDKMAN root."
     (or sdkman-root
         (getenv "SDKMAN_DIR")
         "~/.sdkman"))))
+
+(defun sdkman--ensure-root (&optional implicit)
+  "Return the SDKMAN root, or signal an error when it cannot be found.
+When IMPLICIT is non-nil, use `display-warning' instead of `user-error'.
+Return nil in the implicit/warning case."
+  (let ((root (sdkman--default-root)))
+    (cond
+     ((file-directory-p root) root)
+     (implicit
+      (display-warning 'sdkman
+                       (format "SDKMAN root not found: %s" root)
+                       :warning)
+      nil)
+     (t
+      (user-error "SDKMAN root not found: %s" root)))))
+
+(defun sdkman--init-script (&optional root)
+  "Return absolute path to SDKMAN init script under ROOT, or nil when absent.
+ROOT defaults to `sdkman--default-root'."
+  (let ((script (expand-file-name "bin/sdkman-init.sh"
+                                  (or root (sdkman--default-root)))))
+    (when (file-readable-p script)
+      script)))
+
+(defun sdkman--run-sdk-async (subcommand args &optional buffer sentinel)
+  "Run `sdk SUBCOMMAND ARGS' asynchronously.
+BUFFER is the output buffer; defaults to a new `*sdkman-output*' buffer.
+SENTINEL is called with (process event) on state change.
+Signal `user-error' when the SDKMAN init script cannot be found."
+  (let ((script (sdkman--init-script)))
+    (unless script
+     (user-error "SDKMAN init script not found: %s"
+              (expand-file-name "bin/sdkman-init.sh" (sdkman--default-root))))
+    (let* ((buf (or buffer (get-buffer-create "*sdkman-output*")))
+           (cmd (format "source %s && sdk %s %s"
+                        script subcommand (string-join args " "))))
+      (make-process
+       :name     "sdkman"
+       :buffer   buf
+       :command  (list "bash" "-lc" cmd)
+       :sentinel (or sentinel #'ignore)))))
 
 (defun sdkman--path-directory (path)
   "Return the directory to search from for PATH.
@@ -267,7 +313,6 @@ Return nil when the SDK has no current symlink."
         (push path result)))
     (nreverse result)))
 
-
 ;;;###autoload
 (defun sdkman-apply-buffer-env (&optional file root)
   "Apply nearest .sdkmanrc environment for FILE to the current buffer.
@@ -275,10 +320,11 @@ ROOT defaults to `sdkman--default-root'.  Return an alist of applied
 SDK names to candidate home directories.  When a candidate named in the
 project file is not installed, warn (subject to
 `sdkman-warn-on-missing-candidate') and skip that SDK."
-  (let ((entries (sdkman-read-sdkmanrc
-                  (or file (sdkman-find-sdkmanrc))))
-        (applied nil))
-    (dolist (entry entries)
+  (when (sdkman--ensure-root t)
+    (let ((entries (sdkman-read-sdkmanrc
+                    (or file (sdkman-find-sdkmanrc))))
+          (applied nil))
+      (dolist (entry entries)
       (let* ((sdk (car entry))
              (candidate (cdr entry))
              (home (sdkman-candidate-home sdk candidate root))
@@ -299,10 +345,7 @@ project file is not installed, warn (subject to
                     (concat "candidates/" sdk "/" candidate)
                     (or root (sdkman--default-root))))
            :warning)))))
-    (nreverse applied)))
-
-
-
+    (nreverse applied))))
 
 (defun sdkman--java-runtime-name (candidate)
   "Return a JDT LS runtime name for CANDIDATE, or nil when undetermined.

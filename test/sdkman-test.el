@@ -40,6 +40,22 @@ maven=3.9.15
 					      '(("java" . "26-tem")
 						("maven" . "3.9.15")))))))
 
+
+(ert-deftest sdkman-read-sdkmanrc-handles-surrounding-whitespace ()
+  (sdkman-test-with-temp-dir root
+			     (let ((file (expand-file-name ".sdkmanrc" root)))
+			       (sdkman-test-write-file
+				file
+				"# Enable auto-env through SDKMAN
+ java = 26-tem
+maven=3.9.15
+gradle= 9.5.0
+")
+			       (should (equal (sdkman-read-sdkmanrc file)
+					      '(("java" . "26-tem")
+						("maven" . "3.9.15")
+						("gradle" . "9.5.0")))))))
+
 (ert-deftest sdkman-read-sdkmanrc-preserves-entry-order ()
   (sdkman-test-with-temp-dir root
 			     (let ((file (expand-file-name ".sdkmanrc" root)))
@@ -122,7 +138,7 @@ maven=3.9.15
 
 
 (defun sdkman-test-create-candidate (root sdk candidate)
-  "Create fake SDKMAN candidate under ROOT and return its home."
+  "Create fake SDK candidate under ROOT and return its home."
   (let ((home (expand-file-name
                (format "candidates/%s/%s" sdk candidate)
                root)))
@@ -340,6 +356,31 @@ maven=3.9.15
                                                 (lambda (&rest _) (setq warned t))))
                                        (sdkman-apply-buffer-env nil root)
                                        (should-not warned))))))))
+
+
+(ert-deftest sdkman--ensure-root-signals-user-error-for-missing-root ()
+    (let ((sdkman-root "/tmp/sdkman-does-not-exist-xyzzy"))
+      (should-error (sdkman--ensure-root) :type 'user-error)))
+
+
+ (ert-deftest sdkman--ensure-root-warns-in-implicit-mode ()
+    (let ((sdkman-root "/tmp/sdkman-does-not-exist-xyzzy")
+          (warned nil))
+      (cl-letf (((symbol-function 'display-warning)
+                 (lambda (&rest _) (setq warned t))))
+        (should-not (sdkman--ensure-root t))
+        (should warned))))
+
+(ert-deftest sdkman--init-script-returns-path-under-real-root ()
+    (sdkman-test-with-temp-dir root
+      (let ((script (expand-file-name "bin/sdkman-init.sh" root)))
+        (sdkman-test-write-file script "# stub\n")
+        (should (equal (sdkman--init-script root) script)))))
+
+
+(ert-deftest sdkman--init-script-returns-nil-when-absent ()
+    (sdkman-test-with-temp-dir root
+      (should-not (sdkman--init-script root))))
 
 (provide 'sdkman-test)
 
