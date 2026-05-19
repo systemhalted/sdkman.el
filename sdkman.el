@@ -3,8 +3,8 @@
 ;; Copyright (C) 2026 Palak Mathur
 
 ;; Author: Palak Mathur
-;; Version: 0.1.0
-;; Package-Requires: ((emacs "27.1"))
+;; Version: 0.2.0
+;; Package-Requires: ((emacs "27.1") (transient "0.4.0"))
 ;; Keywords: tools, processes, convenience
 ;; URL: https://github.com/systemhalted/sdkman.el
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -57,6 +57,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'transient)
 
 (defgroup sdkman nil
   "SDKMAN project environment integration."
@@ -173,6 +174,25 @@ Signal `user-error' when the SDKMAN init script cannot be found."
        :buffer   buf
        :command  (list "bash" "-lc" cmd)
        :sentinel (or sentinel #'ignore)))))
+
+(defun sdkman--status-lines (&optional root path)
+  "Return a list of formatted status strings for ROOT and PATH."
+  (let* ((root    (or root (sdkman--default-root)))
+         (rc      (sdkman-find-sdkmanrc path))
+         (entries (when rc (sdkman-read-sdkmanrc rc)))
+         (status  nil))
+    (push (format "SDKMAN root : %s" root) status)
+    (push (format ".sdkmanrc   : %s" (or rc "(none)")) status)
+    (dolist (entry entries)
+      (let* ((sdk       (car entry))
+             (candidate (cdr entry))
+             (home      (sdkman-candidate-home sdk candidate root))
+             (tag       (if home
+                            (format "[current: %s]"
+                                    (or (sdkman-current-candidate sdk root) "?"))
+                          "[NOT INSTALLED]")))
+        (push (format "  %-10s: %s  %s" sdk candidate tag) status)))
+    (nreverse status)))
 
 (defun sdkman--path-directory (path)
   "Return the directory to search from for PATH.
@@ -410,6 +430,8 @@ directories are also excluded."
              (sdkman-find-sdkmanrc))
     (sdkman-mode 1)))
 
+
+
 ;;;###autoload
 (define-minor-mode sdkman-mode
   "Apply the project SDKMAN environment to the current buffer.
@@ -432,6 +454,13 @@ the project declares a Java candidate, `lsp-java-java-path' and
   sdkman-mode
   sdkman--mode-turn-on
   :group 'sdkman)
+
+;;;###autoload (autoload 'sdkman "sdkman" nil t)
+(transient-define-prefix sdkman ()
+  "SDKMAN project menu."
+  [:description
+   (lambda () (string-join (sdkman--status-lines) "\n"))
+   ("q" "Quit" transient-quit-one)])
 
 (provide 'sdkman)
 
