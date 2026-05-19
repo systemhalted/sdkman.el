@@ -59,6 +59,8 @@
 (require 'subr-x)
 (require 'transient)
 
+;;;; Customization
+
 (defgroup sdkman nil
   "SDKMAN project environment integration."
   :group 'tools
@@ -119,12 +121,15 @@ under the SDKMAN root."
   :type 'hook
   :group 'sdkman)
 
-;; Forward declarations for `lsp-java' variables that `sdkman-lsp-java-apply'
-;; sets buffer-locally.  Declaring them keeps the byte compiler quiet when
-;; `lsp-java' is not installed.  The package itself does not require
-;; `lsp-java'.
+;;;; Forward declarations
+
+;; `lsp-java' variables that `sdkman-lsp-java-apply' sets buffer-locally.
+;; Declaring them keeps the byte compiler quiet when `lsp-java' is not
+;; installed.  The package itself does not require `lsp-java'.
 (defvar lsp-java-java-path)
 (defvar lsp-java-configuration-runtimes)
+
+;;;; SDKMAN root and CLI plumbing
 
 (defun sdkman--default-root ()
   "Return the effective SDKMAN root directory."
@@ -175,6 +180,8 @@ Signal `user-error' when the SDKMAN init script cannot be found."
        :command  (list "bash" "-lc" cmd)
        :sentinel (or sentinel #'ignore)))))
 
+;;;; Status helper
+
 (defun sdkman--status-lines (&optional root path)
   "Return a list of formatted status strings for ROOT and PATH."
   (let* ((root    (or root (sdkman--default-root)))
@@ -193,6 +200,8 @@ Signal `user-error' when the SDKMAN init script cannot be found."
                           "[NOT INSTALLED]")))
         (push (format "  %-10s: %s  %s" sdk candidate tag) status)))
     (nreverse status)))
+
+;;;; Path utilities
 
 (defun sdkman--path-directory (path)
   "Return the directory to search from for PATH.
@@ -224,6 +233,8 @@ directory."
       (sdkman--dedupe-path-list (cons bin parts))
       path-separator))))
 
+
+;;;; .sdkmanrc discovery and parsing
 
 ;;;###autoload
 (defun sdkman-find-sdkmanrc (&optional path)
@@ -276,6 +287,8 @@ be found."
               (push entry entries)))
           (forward-line 1)))
       (nreverse entries))))
+
+;;;; Candidate resolution
 
 (defun sdkman-candidate-home (sdk candidate &optional root)
   "Return installed SDKMAN home for SDK CANDIDATE under ROOT.
@@ -333,6 +346,8 @@ Return nil when the SDK has no current symlink."
         (push path result)))
     (nreverse result)))
 
+;;;; Buffer-local environment application
+
 ;;;###autoload
 (defun sdkman-apply-buffer-env (&optional file root)
   "Apply nearest .sdkmanrc environment for FILE to the current buffer.
@@ -366,6 +381,8 @@ project file is not installed, warn (subject to
                     (or root (sdkman--default-root))))
            :warning)))))
     (nreverse applied))))
+
+;;;; LSP Java integration
 
 (defun sdkman--java-runtime-name (candidate)
   "Return a JDT LS runtime name for CANDIDATE, or nil when undetermined.
@@ -423,6 +440,8 @@ directories are also excluded."
             (throw 'excluded t)))
         nil))))
 
+;;;; Minor modes
+
 (defun sdkman--mode-turn-on ()
   "Enable `sdkman-mode' in file-backed buffers with a project `.sdkmanrc'."
   (when (and sdkman-auto-apply
@@ -455,13 +474,65 @@ the project declares a Java candidate, `lsp-java-java-path' and
   sdkman--mode-turn-on
   :group 'sdkman)
 
+;;;; Transient UI and commands
+
+;;;###autoload
+(defun sdkman-open-sdkmanrc ()
+  "Open the nearest .sdkmanrc in a buffer.
+Signal `user-error' when no .sdkmanrc exists above the current directory."
+  (interactive)
+  (let ((rc (sdkman-find-sdkmanrc)))
+    (if rc
+        (find-file rc)
+      (user-error "No .sdkmanrc found above %s" default-directory))))
+
+
+;;;###autoload
+(defun sdkman-show-env ()
+  "Show the current buffer's SDKMAN environment alist in *sdkman-env*."
+  (interactive)
+  (let ((applied (sdkman-apply-buffer-env))
+	(buf (get-buffer-create "*sdkman-env*")))
+	(with-current-buffer buf
+	  (let ((inhibit-read-only t))
+	    (erase-buffer)
+	    (if applied
+		(dolist (pair applied)
+		  (insert (format  "%-12s %s\n" (car pair) (cdr pair))))
+	      (insert "(no SDKMAN environment applied)\n"))
+	    (special-mode)))
+	(pop-to-buffer buf)))
+
+;;;###autoload
+(defun sdkman-show-installed(sdk)
+  "Show installed candidates for SDK in *sdkman-installed* buffer."
+  (interactive
+   (list (completing-read
+	  "SDK: "
+	  (directory-files
+	   (expand-file-name "candidates" (sdkman--default-root))
+	   nil "\\`[^.]"))))
+  (let ((candidates (sdkman-installed-candidates sdk))
+	(buf (get-buffer-create "*sdkman-installed*")))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+	(erase-buffer)
+	(if candidates
+	    (dolist (c candidates)
+	      (insert c "\n"))
+	  (insert (format "(no installed candidates for %s)\n" sdk)))
+	(special-mode)))
+    (pop-to-buffer buf)))
+
 ;;;###autoload (autoload 'sdkman "sdkman" nil t)
 (transient-define-prefix sdkman ()
   "SDKMAN project menu."
   [:description
    (lambda () (string-join (sdkman--status-lines) "\n"))
-   ("q" "Quit" transient-quit-one)])
+   ("o" "Open .sdkmanrc" sdkman-open-sdkmanrc)
+   ("e" "Show SDKMAN environment" sdkman-show-env)
+   ("i" "Show installed candidates" sdkman-show-installed)
+   ("q" "Quit"           transient-quit-one)])
 
 (provide 'sdkman)
-
 ;;; sdkman.el ends here

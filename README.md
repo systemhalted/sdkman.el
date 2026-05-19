@@ -10,10 +10,13 @@ shell auto-env behavior. GUI Emacs launched from the Dock or a Wayland
 session gets the same SDK selection a terminal shell would get after
 `sdk env`.
 
-> **Status:** V1 in progress. Discovery, environment, mode, and
-> `lsp-java` layers are implemented and tested. The transient command
-> UI, the asynchronous `sdk` CLI wrapper, and an expanded out-of-the-box
-> home-env-var list are still to come — see [Roadmap](#roadmap).
+> **Status:** V1 in progress. Discovery, environment application,
+> modes, and `lsp-java` integration are implemented and tested. The
+> transient menu (`M-x sdkman`) is live with read-only actions
+> (open `.sdkmanrc`, show applied env, list installed candidates).
+> Still to come: project-local SDK switching, the asynchronous `sdk`
+> CLI wrapper, and an explicit LSP restart command — see
+> [Roadmap](#roadmap).
 
 ## What works today
 
@@ -27,17 +30,16 @@ candidate before the system version.
 
 **Home environment variables** (`JAVA_HOME` / `MAVEN_HOME` /
 `GRADLE_HOME`) are set buffer-locally for the three candidates listed in
-`sdkman-known-env-vars`. Other candidates do not get a `<NAME>_HOME` set
-automatically yet — add your own mapping via that defcustom if you need
-one before the expanded defaults ship (see [Roadmap](#roadmap)):
+`sdkman-known-env-vars`. Other candidates still get their `bin/` on
+`PATH`, but no `<NAME>_HOME` is set. Add your own mapping for any SDK
+whose tools expect a home variable:
 
 ```elisp
-(setq sdkman-known-env-vars
-      (append sdkman-known-env-vars
-              '(("scala"     . "SCALA_HOME")
-                ("kotlin"    . "KOTLIN_HOME")
-                ("groovy"    . "GROOVY_HOME")
-                ("ant"       . "ANT_HOME"))))
+(add-to-list 'sdkman-known-env-vars '("ant"      . "ANT_HOME"))
+(add-to-list 'sdkman-known-env-vars '("groovy"   . "GROOVY_HOME"))
+(add-to-list 'sdkman-known-env-vars '("spark"    . "SPARK_HOME"))
+(add-to-list 'sdkman-known-env-vars '("hadoop"   . "HADOOP_HOME"))
+(add-to-list 'sdkman-known-env-vars '("activemq" . "ACTIVEMQ_HOME"))
 ```
 
 **Java + JDT LS** gets an extra layer. When `.sdkmanrc` contains
@@ -88,20 +90,35 @@ project SDK selection buffer-locally as described in
 The Java language level still comes from Maven/Gradle/Eclipse project
 metadata (e.g. `maven.compiler.release`), not from `JAVA_HOME` alone.
 
+### Transient menu
+
+Run `M-x sdkman` from any project buffer to open the SDKMAN menu. The
+header shows the current SDKMAN root, the nearest `.sdkmanrc`, and per-SDK
+status (current candidate or `[NOT INSTALLED]`). Bindings:
+
+- `o` — open the nearest `.sdkmanrc`
+- `e` — show the applied SDKMAN environment in `*sdkman-env*`
+- `i` — show installed candidates for an SDK (with completion)
+- `q` — close the menu
+
 ### Public API
 
-| Symbol                          | Kind     | Purpose                                                       |
-| ------------------------------- | -------- | ------------------------------------------------------------- |
-| `sdkman-mode`                   | minor    | Apply project SDKMAN env to the current buffer.               |
-| `global-sdkman-mode`            | global   | Activate `sdkman-mode` in file buffers with a `.sdkmanrc`.    |
-| `sdkman-apply-buffer-env`       | function | Apply the project env once, without enabling the mode.        |
-| `sdkman-lsp-java-apply`         | function | Apply `lsp-java`-specific settings for the project Java.      |
-| `sdkman-find-sdkmanrc`          | function | Locate the nearest `.sdkmanrc`.                               |
-| `sdkman-read-sdkmanrc`          | function | Parse a `.sdkmanrc` into an alist.                            |
-| `sdkman-candidate-home`         | function | Resolve an installed candidate's home directory.              |
-| `sdkman-installed-candidates`   | function | List installed candidates for an SDK.                         |
-| `sdkman-current-candidate`      | function | Read the SDKMAN `current` symlink for an SDK.                 |
-| `sdkman-lsp-java-excluded-file-p` | function | Predicate: file is inside an `lsp-java` generated directory. |
+| Symbol                            | Kind     | Purpose                                                       |
+| --------------------------------- | -------- | ------------------------------------------------------------- |
+| `sdkman`                          | command  | Open the SDKMAN transient menu (`M-x sdkman`).                |
+| `sdkman-open-sdkmanrc`            | command  | Open the nearest `.sdkmanrc` in a buffer.                     |
+| `sdkman-show-env`                 | command  | Show applied SDKMAN env in `*sdkman-env*`.                    |
+| `sdkman-show-installed`           | command  | Show installed candidates for an SDK (prompts with completion). |
+| `sdkman-mode`                     | minor    | Apply project SDKMAN env to the current buffer.               |
+| `global-sdkman-mode`              | global   | Activate `sdkman-mode` in file buffers with a `.sdkmanrc`.    |
+| `sdkman-apply-buffer-env`         | function | Apply the project env once, without enabling the mode.        |
+| `sdkman-lsp-java-apply`           | function | Apply `lsp-java`-specific settings for the project Java.      |
+| `sdkman-find-sdkmanrc`            | function | Locate the nearest `.sdkmanrc`.                               |
+| `sdkman-read-sdkmanrc`            | function | Parse a `.sdkmanrc` into an alist.                            |
+| `sdkman-candidate-home`           | function | Resolve an installed candidate's home directory.              |
+| `sdkman-installed-candidates`     | function | List installed candidates for an SDK.                         |
+| `sdkman-current-candidate`        | function | Read the SDKMAN `current` symlink for an SDK.                 |
+| `sdkman-lsp-java-excluded-file-p` | function | Predicate: file is inside an `lsp-java` generated directory.  |
 
 ### Customization
 
@@ -118,10 +135,11 @@ metadata (e.g. `maven.compiler.release`), not from `JAVA_HOME` alone.
 emacs --batch -Q -L . -l test/sdkman-test.el -f ert-run-tests-batch-and-exit
 ```
 
-24 tests cover the parser, candidate resolution, environment application
-(including PATH/exec-path dedupe and missing-candidate warnings), the
-`lsp-java` integration, runtime-name derivation, and the exclusion
-predicate.
+39 tests cover the parser (including whitespace edge cases), candidate
+resolution, environment application (PATH/exec-path dedupe and
+missing-candidate warnings), root validation, the async runner's init
+script resolution, the `lsp-java` integration, the status helper, and
+all three transient read-only actions.
 
 ## Roadmap
 
@@ -129,16 +147,12 @@ Planned for upcoming releases. See
 [`docs/v1-plan.md`](docs/v1-plan.md) for the phased implementation plan,
 and [`docs/requirements.md`](docs/requirements.md) for the V1 spec.
 
-- **Expanded `sdkman-known-env-vars` defaults.** Out-of-the-box
-  `<NAME>_HOME` for the common JVM-ecosystem SDKs: `ant`, `groovy`,
-  `scala`, `kotlin`, `sbt`, `spark`, `hadoop`, `micronaut`,
-  `springboot`, `quarkus`, `jbang`, `mvnd`, `leiningen`, `activemq`.
-- **Transient command UI (`M-x sdkman`).** A Magit-style menu showing
-  SDKMAN root, the nearest `.sdkmanrc`, parsed entries, and
-  installed/current candidates; with actions to switch project SDKs,
-  open or create `.sdkmanrc`, and drive the SDKMAN CLI.
-- **Asynchronous `sdk` CLI wrapper.** `sdk list` / `install` /
-  `uninstall` / `default` / `current` / `upgrade` / `selfupdate`
+- **Project-local SDK switching.** `M-x sdkman` actions to create or
+  edit `.sdkmanrc` from inside Emacs, re-applying `sdkman-mode` to
+  affected buffers in the project so the new env takes effect without
+  reverting buffers by hand.
+- **Asynchronous `sdk` CLI wrapper.** `sdk list` / `current` /
+  `install` / `uninstall` / `default` / `upgrade` / `selfupdate`
   driven from inside Emacs into a dedicated process buffer, with
   confirmation prompts on global-mutating operations.
 - **Explicit LSP-restart command.** Apply SDKMAN state and then call

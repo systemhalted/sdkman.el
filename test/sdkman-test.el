@@ -380,7 +380,108 @@ maven=3.9.15
 
 (ert-deftest sdkman--init-script-returns-nil-when-absent ()
     (sdkman-test-with-temp-dir root
-      (should-not (sdkman--init-script root))))
+			       (should-not (sdkman--init-script root))))
+
+
+(ert-deftest sdkman--status-lines-no-sdkmanrc ()
+    (sdkman-test-with-temp-dir root
+      (let ((lines (sdkman--status-lines root nil)))
+        (should (string-match-p "(none)" (nth 1 lines))))))
+
+ (ert-deftest sdkman--status-lines-installed-entry ()
+    (sdkman-test-with-temp-dir root
+      ;; Create the candidate dir AND a `current' symlink pointing at it
+      (let* ((java-dir (expand-file-name "candidates/java" root))
+             (sdkmanrc (expand-file-name ".sdkmanrc" root)))
+        (sdkman-test-mkdir (expand-file-name "26-tem" java-dir))
+        (make-symbolic-link "26-tem" (expand-file-name "current" java-dir))
+        (sdkman-test-write-file sdkmanrc "java=26-tem\n")
+        (let ((lines (sdkman--status-lines root sdkmanrc)))
+          (should (cl-some (lambda (line) (string-match-p "\\[current: 26-tem\\]" line))
+                           lines))))))
+(ert-deftest sdkman--status-lines-missing-entry ()
+    (sdkman-test-with-temp-dir root
+      (let ((sdkmanrc (expand-file-name ".sdkmanrc" root)))
+        (sdkman-test-write-file sdkmanrc "java=26-tem\n")
+        (let ((lines (sdkman--status-lines root sdkmanrc)))
+          (should (cl-some (lambda (line) (string-match-p "\\[NOT INSTALLED\\]" line))
+                           lines))))))
+
+(ert-deftest sdkman--status-lines-multiple-entries ()
+    (sdkman-test-with-temp-dir root
+      (let ((sdkmanrc (expand-file-name ".sdkmanrc" root)))
+        (sdkman-test-write-file sdkmanrc "java=26-tem\nmaven=3.9.15\ngradle=9.5.0\n")
+        (let ((lines (sdkman--status-lines root sdkmanrc)))
+          (should (= (length lines) 5))))))   ; 2 header lines + 3 entries
+
+ (ert-deftest sdkman-open-sdkmanrc-opens-the-found-rc-file ()
+    (sdkman-test-with-temp-dir root
+      (let* ((sdkmanrc (expand-file-name ".sdkmanrc" root))
+             (opened nil))
+        (sdkman-test-write-file sdkmanrc "java=26-tem\n")
+        ;; Stub find-file to record its argument instead of opening a buffer.
+        (cl-letf (((symbol-function 'find-file)
+                   (lambda (path) (setq opened path))))
+          (let ((default-directory root))
+            (sdkman-open-sdkmanrc)))
+        (should (equal opened sdkmanrc)))))
+
+(ert-deftest sdkman-open-sdkmanrc-signals-when-no-rc ()
+    (sdkman-test-with-temp-dir root
+      (let ((default-directory root))
+        (should-error (sdkman-open-sdkmanrc) :type 'user-error))))
+
+(ert-deftest sdkman-show-env-shows-applied-sdks ()
+    (sdkman-test-with-temp-dir root
+      (let* ((project (expand-file-name "project" root))
+             (file    (expand-file-name "App.java" project))
+             (java-home (sdkman-test-create-candidate root "java" "26-tem")))
+        (sdkman-test-write-file (expand-file-name ".sdkmanrc" project)
+                                "java=26-tem\n")
+        (sdkman-test-write-file file "class App {}\n")
+        ;; Stub pop-to-buffer so the test doesn't try to open a window.
+        (cl-letf (((symbol-function 'pop-to-buffer) #'ignore))
+          (let ((default-directory project)
+                (sdkman-root root))
+            (with-temp-buffer
+              (setq buffer-file-name file)
+              (sdkman-show-env))))
+        (with-current-buffer "*sdkman-env*"
+          (should (string-match-p "java" (buffer-string)))
+          (should (string-match-p (regexp-quote java-home) (buffer-string)))))))
+
+
+(ert-deftest sdkman-show-env-shows-fallback-when-no-env ()
+    (sdkman-test-with-temp-dir root
+      (let ((default-directory root))
+        (cl-letf (((symbol-function 'pop-to-buffer) #'ignore))
+          (with-temp-buffer
+            (sdkman-show-env)))
+        (with-current-buffer "*sdkman-env*"
+          (should (string-match-p "no SDKMAN environment applied"
+                                  (buffer-string)))))))
+
+(ert-deftest sdkman-show-installed-lists-candidates ()
+    (sdkman-test-with-temp-dir root
+      (let ((sdkman-root root))
+        ;; Create two installed candidates under candidates/java
+        (sdkman-test-mkdir (expand-file-name "candidates/java/26-tem" root))
+        (sdkman-test-mkdir (expand-file-name "candidates/java/21.0.11-tem" root))
+        (cl-letf (((symbol-function 'pop-to-buffer) #'ignore))
+          (sdkman-show-installed "java"))
+        (with-current-buffer "*sdkman-installed*"
+          (should (string-match-p "26-tem" (buffer-string)))
+          (should (string-match-p "21\\.0\\.11-tem" (buffer-string)))))))
+
+ (ert-deftest sdkman-show-installed-shows-fallback-when-no-candidates ()
+    (sdkman-test-with-temp-dir root
+      (let ((sdkman-root root))
+        (cl-letf (((symbol-function 'pop-to-buffer) #'ignore))
+          (sdkman-show-installed "java"))
+        (with-current-buffer "*sdkman-installed*"
+          (should (string-match-p "no installed candidates for java"
+                                  (buffer-string)))))))
+
 
 (provide 'sdkman-test)
 
