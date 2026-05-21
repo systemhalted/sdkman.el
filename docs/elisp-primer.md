@@ -959,7 +959,7 @@ Not autoloaded: `sdkman--default-root`, `sdkman--parse-line`, `sdkman--prepend-b
 
 ## What You Now Know
 
-Every concept above is present in code you've written or read:
+Every concept above is present in code we've written or read:
 
 ```
 S-expressions       → every line of the file
