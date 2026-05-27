@@ -483,6 +483,32 @@ maven=3.9.15
                                   (buffer-string)))))))
 
 
+;;;; Phase 2 — async sdk CLI passthrough
+
+(ert-deftest sdkman--process-sentinel-messages-on-nonzero-exit ()
+    "Sentinel calls `message' with the exit info when the process exits non-zero."
+    (let ((captured nil))
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args)
+                   (setq captured (apply #'format fmt args)))))
+        (let ((proc (make-process
+                     :name "sdkman-test-fail"
+                     :buffer (generate-new-buffer " *sdkman-test-fail*")
+                     :command '("sh" "-c" "exit 7")
+                     :sentinel #'sdkman--process-sentinel)))
+          (unwind-protect
+              (progn
+                (while (process-live-p proc)
+                  (accept-process-output proc 1))
+                ;; Let the event loop run once more so the sentinel can fire.
+                (accept-process-output nil 0.1)
+                (should captured)
+                (should (string-match-p "exited" captured))
+                (should (string-match-p "7" captured)))
+            (when (buffer-live-p (process-buffer proc))
+              (kill-buffer (process-buffer proc))))))))
+
+
 (provide 'sdkman-test)
 
 ;;; sdkman-test.el ends here

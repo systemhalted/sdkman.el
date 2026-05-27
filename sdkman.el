@@ -3,7 +3,7 @@
 ;; Copyright (C) 2026 Palak Mathur
 
 ;; Author: Palak Mathur
-;; Version: 0.2.0
+;; Version: 0.3.0
 ;; Package-Requires: ((emacs "27.1") (transient "0.4.0"))
 ;; Keywords: tools, processes, convenience
 ;; URL: https://github.com/systemhalted/sdkman.el
@@ -172,7 +172,7 @@ Signal `user-error' when the SDKMAN init script cannot be found."
      (user-error "SDKMAN init script not found: %s"
               (expand-file-name "bin/sdkman-init.sh" (sdkman--default-root))))
     (let* ((buf (or buffer (get-buffer-create "*sdkman-output*")))
-           (cmd (format "source %s && sdk %s %s"
+           (cmd (format "source %s && PAGER=cat sdk %s %s"
                         script subcommand (string-join args " "))))
       (make-process
        :name     "sdkman"
@@ -524,15 +524,68 @@ Signal `user-error' when no .sdkmanrc exists above the current directory."
 	(special-mode)))
     (pop-to-buffer buf)))
 
+;;;; Async sdk CLI passthrough
+(define-derived-mode sdkman-process-mode
+  compilation-mode
+  "SDKMAN"
+  "Major mode for asynchronous SDK CLI Passthrough."
+  :group 'sdkman)
+
+
+(defun sdkman--process-sentinel (process event)
+  "Sentinel to read PROCESS EVENT output for sdk CLI commands."
+  (when (memq(process-status process) '(exit signal))
+	(let ((exit-code (process-exit-status process)))
+	  (when (/= exit-code 0)
+		(message "sdkman: %s - %s" (process-name process) (string-trim event)))
+	  )))
+
+(defun sdkman--run-cli (subcommand args buffer-name)
+  "Spawn `sdk SUBCOMMAND ARGS' in buffer BUFFER-NAME.
+Output is filtered through `sdkman--process-sentinel'."
+  (let ((buf (get-buffer-create buffer-name)))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+	(erase-buffer)
+	(insert (format "$ sdk %s %s\n\n" subcommand (string-join args " ")))
+	(sdkman--run-sdk-async subcommand args buf #'sdkman--process-sentinel))
+	(sdkman-process-mode))
+    (pop-to-buffer buf)))
+
+
+;;;###autoload
+(defun sdkman-sdk-list (sdk)
+  "Run `sdk list SDK' asynchronously and show output in a dedicated buffer."
+  (interactive
+   (list (completing-read
+	  "SDK: "
+	  (directory-files
+	   (expand-file-name "candidates" (sdkman--ensure-root))
+	   nil "\\`[^.]"))))
+    (sdkman--ensure-root)
+    (sdkman--run-cli "list" (list sdk) (format "*sdkman: list %s*" sdk))
+    )
+
+;;;###autoload
+(defun sdkman-sdk-current ()
+  "Run `sdk current' asynchronously and show output in `*sdkman: current*'."
+  (interactive)
+  (sdkman--ensure-root)
+  (sdkman--run-cli "current" nil "*sdkman: current*"))
+
 ;;;###autoload (autoload 'sdkman "sdkman" nil t)
 (transient-define-prefix sdkman ()
   "SDKMAN project menu."
   [:description
    (lambda () (string-join (sdkman--status-lines) "\n"))
-   ("o" "Open .sdkmanrc" sdkman-open-sdkmanrc)
-   ("e" "Show SDKMAN environment" sdkman-show-env)
-   ("i" "Show installed candidates" sdkman-show-installed)
-   ("q" "Quit"           transient-quit-one)])
+   ["Project"
+    ("o" "Open .sdkmanrc" sdkman-open-sdkmanrc)
+    ("e" "Show SDKMAN environment" sdkman-show-env)
+    ("i" "Show installed candidates" sdkman-show-installed)]
+   ["SDKMAN CLI"
+    ("L" "List candidates" sdkman-sdk-list)
+    ("C" "Show current" sdkman-sdk-current)]
+   [("q" "Quit"           transient-quit-one)]])
 
 (provide 'sdkman)
 ;;; sdkman.el ends here
