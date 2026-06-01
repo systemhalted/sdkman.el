@@ -5,6 +5,14 @@
 (require 'ert)
 (require 'sdkman)
 
+;; Forward declarations for the optional `lsp-java' variables that
+;; `sdkman-lsp-java-apply' sets buffer-locally.  sdkman.el declares these
+;; for its own compilation; repeating them here marks them special when
+;; this test file is byte-compiled on its own, silencing free-variable
+;; warnings.
+(defvar lsp-java-java-path)
+(defvar lsp-java-configuration-runtimes)
+
 (defmacro sdkman-test-with-temp-dir (var &rest body)
   "Bind VAR to a temporary directory while evaluating BODY."
   (declare (indent 1))
