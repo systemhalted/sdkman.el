@@ -1257,4 +1257,4 @@ accept-process-output  → sdkman-test--wait-for-process
 Line numbers drift as the package evolves; the names above are stable
 anchors — `M-.` (`xref-find-definitions`) jumps to any of them.
 
-The next step is the V1 roadmap in `docs/v1-plan.md` — transient UI, sdk CLI wrapper, and explicit LSP restart.
+The transient UI (Phase 1) and the read-only `sdk` CLI passthrough — `list` / `current` (Phase 2) — already ship. The remaining V1 roadmap in `docs/v1-plan.md` is project-local SDK switching, an explicit LSP-restart command, and the mutating `sdk` commands (`install` / `uninstall` / `default` / `upgrade` / `selfupdate`) gated on confirmation.
