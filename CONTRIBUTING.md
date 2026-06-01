@@ -27,7 +27,16 @@ Load the package in your current session:
 (load-file "/path/to/sdkman.el/sdkman.el")
 ```
 
-Or add to your init.el for persistent use:
+Or add to your init.el for persistent use. On **Emacs 30.1+**, `use-package`
+supports `:vc`, which installs straight from GitHub — no extra packages needed:
+
+```emacs-lisp
+(use-package sdkman
+  :vc (:url "https://github.com/systemhalted/sdkman.el" :rev :newest)
+  :config (global-sdkman-mode 1))
+```
+
+On older Emacs, load it from a local clone:
 
 ```emacs-lisp
 (use-package sdkman

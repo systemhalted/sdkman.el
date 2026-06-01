@@ -50,9 +50,20 @@ from the candidate version. JDT LS launches with the project JDK.
 
 ## Install
 
-The package is not on MELPA yet. Clone the repo and load it locally.
+The package is not on MELPA yet.
 
-With `use-package` and a path:
+On **Emacs 30.1+**, `use-package` supports `:vc`, which installs straight
+from GitHub — no extra packages needed:
+
+```elisp
+(use-package sdkman
+  :vc (:url "https://github.com/systemhalted/sdkman.el" :rev :newest)
+  :init
+  (global-sdkman-mode 1))
+```
+
+On older Emacs, clone the repo and load it locally with `use-package` and
+a path:
 
 ```elisp
 (use-package sdkman
@@ -61,7 +72,7 @@ With `use-package` and a path:
   (global-sdkman-mode 1))
 ```
 
-With `straight.el`:
+Or with `straight.el`:
 
 ```elisp
 (use-package sdkman
