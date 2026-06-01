@@ -957,30 +957,304 @@ Not autoloaded: `sdkman--default-root`, `sdkman--parse-line`, `sdkman--prepend-b
 
 ---
 
+## Module 21 — define-derived-mode
+
+### Concept
+
+A **major mode** controls how Emacs interacts with a buffer: keymap, syntax table, font-lock rules, what `q` does. `define-derived-mode` creates one by inheriting from a parent:
+
+```emacs-lisp
+(define-derived-mode CHILD PARENT MODE-LINE-LIGHTER DOCSTRING
+  BODY...)
+```
+
+The child gets the parent's keymap, syntax table, and hooks for free. You only need to write the *differences*. A mode derived from `compilation-mode` immediately gets `q` (bury), `n`/`p` (next/previous match), automatic read-only buffers, and font-locked error patterns — without writing any of that yourself.
+
+Compare with `define-minor-mode` (Module 18+19): minor modes are *toggleable* layers on top of any major mode (`SDKMAN` lighter that doesn't change keymaps); major modes are the *primary* mode of a buffer and there is only ever one active.
+
+```emacs-lisp
+(define-derived-mode my-log-mode special-mode "MyLog"
+  "Major mode for my-tool log buffers.")
+```
+
+### In sdkman.el
+
+```emacs-lisp
+(define-derived-mode sdkman-process-mode compilation-mode "SDKMAN"
+  "Major mode for buffers showing SDKMAN async process output.
+Derives from `compilation-mode' so `q' buries the buffer and `n'/`p'
+navigate hits.")
+```
+
+Three meaningful words: `sdkman-process-mode` (child), `compilation-mode` (parent), `"SDKMAN"` (mode-line lighter). No body — the parent handles everything we need.
+
+### Exercise
+
+```emacs-lisp
+;; In *scratch*:
+(define-derived-mode my-log-mode special-mode "MyLog"
+  "Toy log mode.")
+
+;; Now create a buffer in that mode:
+(with-current-buffer (get-buffer-create "*my-log*")
+  (my-log-mode)
+  (insert "hello"))    ; will error — buffer is read-only (from special-mode)
+
+;; To insert, suppress read-only first:
+(with-current-buffer "*my-log*"
+  (let ((inhibit-read-only t))
+    (insert "hello\n")))
+```
+
+You inherited `special-mode`'s read-only behavior without writing a single line of code that mentions read-only.
+
+---
+
+## Module 22 — Process sentinels and make-process
+
+### Concept
+
+`make-process` spawns an external program asynchronously and returns a *process object* immediately — Emacs does not block. The process writes its stdout/stderr to a buffer you nominate. To run code *when the process finishes*, you attach a **sentinel**: a function Emacs calls on every state change.
+
+```emacs-lisp
+(make-process
+ :name     "my-job"                       ; appears in M-x list-processes
+ :buffer   (get-buffer-create "*out*")    ; output goes here
+ :command  (list "sleep" "1")             ; argv
+ :sentinel (lambda (proc event)
+             (message "state: %s" event)))
+```
+
+A sentinel has signature `(PROCESS EVENT)`:
+
+- `PROCESS` is the same process object `make-process` returned.
+- `EVENT` is a *string* describing the change: `"finished\n"`, `"exited abnormally with code 7\n"`, `"killed\n"`. Always ends with a newline — `string-trim` it before formatting.
+
+Inside the sentinel, two functions matter most:
+
+- `(process-status PROC)` — symbol: `'run`, `'exit`, `'signal`, `'stop`.
+- `(process-exit-status PROC)` — integer exit code (0 for success).
+
+A sentinel is called on every transition, including intermediate ones. Always guard for the terminal states you care about:
+
+```emacs-lisp
+(when (memq (process-status proc) '(exit signal))
+  ...)
+```
+
+### In sdkman.el
+
+The runner from Phase 0:
+
+```emacs-lisp
+(make-process
+ :name     "sdkman"
+ :buffer   buf
+ :command  (list "bash" "-lc" cmd)
+ :sentinel (or sentinel #'ignore))
+```
+
+The Phase 2 sentinel — terse on success, vocal on failure:
+
+```emacs-lisp
+(defun sdkman--process-sentinel (process event)
+  "Surface non-zero exit status of PROCESS via `message'.
+EVENT is the process state-change string."
+  (when (memq (process-status process) '(exit signal))
+    (let ((code (process-exit-status process)))
+      (when (/= code 0)
+        (message "sdkman: %s exited %d (%s)"
+                 (process-name process) code (string-trim event))))))
+```
+
+Why this shape: on success the user already sees the output in the buffer — no message needed. On failure, the buffer might be empty or look the same as the last (successful) run; an echo-area `exited 7` is the only reliable cue.
+
+### Exercise
+
+```emacs-lisp
+;; Spawn a job that takes 1 second, then logs its exit:
+(make-process
+ :name "demo"
+ :buffer (get-buffer-create "*demo*")
+ :command (list "sh" "-c" "echo hello; sleep 1; exit 3")
+ :sentinel (lambda (proc event)
+             (when (memq (process-status proc) '(exit signal))
+               (message "demo finished: exit=%d event=%S"
+                        (process-exit-status proc)
+                        (string-trim event)))))
+
+;; Switch to *Messages* (C-h e) — the line appears ~1 second later.
+;; *demo* buffer contains the literal "hello".
+```
+
+Predict before you run: will the message appear before `make-process` returns, or after? (After. `make-process` returns immediately; the sentinel fires from the event loop later.)
+
+---
+
+## Module 23 — cl-letf for stub-injection in tests
+
+### Concept
+
+`let` rebinds **variables**. `cl-letf` rebinds **places** — including the function slot of a symbol. That makes it the canonical way to stub a function for the duration of a test, without touching the global binding:
+
+```emacs-lisp
+(cl-letf (((symbol-function 'message)
+           (lambda (fmt &rest args)
+             (push (apply #'format fmt args) my-captured))))
+  (do-something-that-calls-message))
+;; `message' is itself again outside the body.
+```
+
+The double parens are not a typo: the outer parens are `cl-letf`'s binding list (like `let`); the inner parens wrap a *place* form — `(symbol-function 'foo)` is the function cell of the symbol `foo`. `cl-letf` swaps it on entry and restores on exit, even if the body errors.
+
+Why not `defun` a fake `message` for the test? Because that mutates globally and leaks to other tests. `cl-letf` is scoped.
+
+A common stub recipe:
+
+| Goal | Stub |
+|---|---|
+| Capture calls | `(lambda (&rest args) (push args captured))` |
+| Suppress side effect | `#'ignore` |
+| Return a fixed value | `(lambda (&rest _) value)` |
+| Pass through but log | `(let ((orig (symbol-function 'foo))) (lambda (&rest args) (apply orig args)))` |
+
+### In sdkman.el tests
+
+```emacs-lisp
+(cl-letf (((symbol-function 'pop-to-buffer) #'ignore)
+          ((symbol-function 'message)
+           (lambda (fmt &rest args)
+             (push (apply #'format fmt args) messages))))
+  (sdkman-sdk-current)
+  (sdkman-test--wait-for-process (get-buffer "*sdkman: current*")))
+```
+
+Two stubs at once: `pop-to-buffer` is silenced (we don't want a window in batch tests); `message` is captured into a local list so we can assert on its content later. After the `cl-letf` body exits, both functions are restored.
+
+### Exercise
+
+```emacs-lisp
+;; In *scratch*: capture every message during a block.
+(let ((seen nil))
+  (cl-letf (((symbol-function 'message)
+             (lambda (fmt &rest args)
+               (push (apply #'format fmt args) seen))))
+    (message "hello %s" "world")
+    (message "%d + %d = %d" 2 3 5))
+  (nreverse seen))
+;; → ("hello world" "2 + 3 = 5")
+
+;; Confirm message is restored:
+(message "back to normal")    ; appears in *Messages*
+```
+
+A historical note: Emacs once had `letf` in `cl.el`. That predecessor is deprecated. Always use `cl-letf` (from `cl-lib`, which sdkman.el already requires).
+
+---
+
+## Module 24 — accept-process-output
+
+### Concept
+
+Emacs has one thread. Asynchronous processes deliver output and call sentinels only when control returns to the event loop. In an interactive session that happens naturally between keystrokes. In a synchronous test there is no event loop — so a freshly spawned process can sit "alive" forever from the test's perspective, even after the OS has reaped it.
+
+`accept-process-output` is the explicit yield:
+
+```emacs-lisp
+(accept-process-output PROCESS TIMEOUT-SECONDS)
+```
+
+It returns when:
+
+- The process emits output, **or**
+- The timeout elapses, **or**
+- The process changes state (and the sentinel runs).
+
+`(while (process-live-p proc) (accept-process-output proc 1))` is the canonical "wait until this process exits" idiom. Each iteration yields the event loop; once the process dies, `process-live-p` returns nil and the loop terminates.
+
+A common subtlety: the sentinel may be queued *just after* `process-live-p` flips. One extra `(accept-process-output nil 0.1)` after the loop flushes that final callback.
+
+### In sdkman.el tests
+
+```emacs-lisp
+(defun sdkman-test--wait-for-process (buffer)
+  "Block until BUFFER's process exits and its sentinel has run."
+  (let ((proc (get-buffer-process buffer)))
+    (while (and proc (process-live-p proc))
+      (accept-process-output proc 1))
+    ;; Flush any sentinel side effects queued after the process exits.
+    (accept-process-output nil 0.1)))
+```
+
+Note `get-buffer-process` — when `make-process` is called with `:buffer BUF`, Emacs associates the process with that buffer. `get-buffer-process` looks it up. This is how the test reaches the async process without the caller returning it.
+
+**Don't** do `(sleep-for 1)` instead. It blocks Emacs without yielding the event loop, so the sentinel never runs.
+
+**Don't** do `(while (process-live-p proc))` without `accept-process-output` inside. That's a busy loop that *also* never yields — Emacs spins at 100% CPU and the process is never noticed as dead.
+
+### Exercise
+
+```emacs-lisp
+;; Spawn a process and wait for it synchronously:
+(let* ((buf (get-buffer-create "*demo*"))
+       (proc (make-process
+              :name "demo"
+              :buffer buf
+              :command (list "sh" "-c" "echo hi; sleep 1; exit 0"))))
+  (while (process-live-p proc)
+    (accept-process-output proc 0.1))
+  (with-current-buffer buf (buffer-string)))
+;; → "hi\n\nProcess demo finished\n"
+;; (Emacs appends the second line itself when a process exits cleanly.)
+```
+
+Then try the broken version:
+
+```emacs-lisp
+(let* ((buf (get-buffer-create "*demo2*"))
+       (proc (make-process
+              :name "demo2"
+              :buffer buf
+              :command (list "sh" "-c" "echo hi; sleep 1; exit 0"))))
+  (sleep-for 2)        ; this blocks instead of yielding
+  (with-current-buffer buf (buffer-string)))
+```
+
+It works *by accident* — `sleep-for` does happen to call `accept-process-output` internally in modern Emacs. The point: `accept-process-output` is the contract; everything else is incidental.
+
+---
+
 ## What You Now Know
 
-Every concept above is present in code you've written or read:
+Every concept above is present in code we've written or read:
 
 ```
-S-expressions       → every line of the file
-defvar/defgroup     → lines 61–64, 121–122
-defcustom           → lines 66–115
-defun/&optional     → lines 124–369
-let/let*            → lines 132, 149, 219, 244...
-when/cond           → lines 182, 253, 287...
-when-let/when-let*  → lines 170, 198, 324
-alists/car/cdr      → lines 74–81, 186–189, 291
-push/nreverse       → lines 199–213, 259–269
-dolist              → lines 263, 282
-string operations   → lines 177–190, 308–314
-file system ops     → lines 124–257
-setq-local/getenv   → lines 143–160
-cl-loop             → lines 234–238
-catch/throw         → lines 357–362
-with-temp-buffer    → lines 201–212
-define-minor-mode   → lines 372–386
-define-globalized   → lines 389–392
-provide/autoload    → line 394, cookies throughout
+S-expressions          → every line of the file
+defvar/defgroup        → defgroup sdkman, defvar forward declarations
+defcustom              → sdkman-root, sdkman-known-env-vars, etc.
+defun/&optional        → most functions
+let/let*               → throughout
+when/cond              → sdkman--ensure-root, sdkman--parse-line
+when-let/when-let*     → sdkman-read-sdkmanrc, sdkman--status-lines
+alists/car/cdr         → sdkman-known-env-vars, sdkman-read-sdkmanrc result
+push/nreverse          → sdkman--status-lines, sdkman-read-sdkmanrc
+dolist                 → sdkman-apply-buffer-env, sdkman--status-lines
+string operations      → sdkman--parse-line, sdkman--run-sdk-async
+file system ops        → sdkman-find-sdkmanrc, sdkman--init-script
+setq-local/getenv      → sdkman--setenv-local, sdkman--prepend-bin-local
+cl-loop                → sdkman-installed-candidates
+catch/throw            → sdkman-lsp-java-excluded-file-p
+with-temp-buffer       → sdkman-read-sdkmanrc
+define-minor-mode      → sdkman-mode
+define-globalized      → global-sdkman-mode
+provide/autoload       → bottom of file, cookies throughout
+define-derived-mode    → sdkman-process-mode
+make-process/sentinel  → sdkman--run-sdk-async, sdkman--process-sentinel
+cl-letf                → throughout test suite for stubbing
+accept-process-output  → sdkman-test--wait-for-process
 ```
+
+Line numbers drift as the package evolves; the names above are stable
+anchors — `M-.` (`xref-find-definitions`) jumps to any of them.
 
 The next step is the V1 roadmap in `docs/v1-plan.md` — transient UI, sdk CLI wrapper, and explicit LSP restart.
