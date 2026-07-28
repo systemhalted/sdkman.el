@@ -3,6 +3,7 @@
 ;; Copyright (C) 2026 Palak Mathur
 
 ;; Author: Palak Mathur
+;; Maintainer: Palak Mathur
 ;; Version: 0.2.0
 ;; Package-Requires: ((emacs "27.1") (transient "0.4.0"))
 ;; Keywords: tools, processes, convenience
